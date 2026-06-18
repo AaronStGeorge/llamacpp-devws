@@ -181,7 +181,7 @@ def print_dnf_hint(missing: list[str]) -> None:
         print(f"  sudo dnf install -y {' '.join(sorted(packages))}")
 
 
-def require_prereqs(workspace: Path, hrx_src: Path, llama_src: Path) -> None:
+def require_prereqs(workspace: Path, hrx_src: Path, llama_src: Path, skip_source_branch_check: bool) -> None:
     rocm = workspace / "rocm"
     missing_host: list[str] = []
     missing_rocm: list[str] = []
@@ -221,15 +221,16 @@ def require_prereqs(workspace: Path, hrx_src: Path, llama_src: Path) -> None:
     if not llama_src.exists():
         errors.append(f"missing llama.cpp source checkout: {llama_src}")
 
-    if hrx_src.exists():
+    if hrx_src.exists() and not skip_source_branch_check:
         branch = git_branch(hrx_src)
         if branch != EXPECTED_HRX_BRANCH:
             errors.append(f"hrx-system branch is {branch!r}; expected {EXPECTED_HRX_BRANCH!r}")
 
-    if llama_src.exists():
+    if llama_src.exists() and not skip_source_branch_check:
         branch = git_branch(llama_src)
         if branch != EXPECTED_LLAMA_BRANCH:
             errors.append(f"llama.cpp branch is {branch!r}; expected {EXPECTED_LLAMA_BRANCH!r}")
+    if llama_src.exists():
         if not (llama_src / "ggml" / "src" / "ggml-hrx" / "CMakeLists.txt").exists():
             errors.append("llama.cpp checkout does not contain ggml/src/ggml-hrx/CMakeLists.txt")
         if not (llama_src / "ggml" / "src" / "ggml-hrx2" / "CMakeLists.txt").exists():
@@ -567,6 +568,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--configure-only", action="store_true")
     parser.add_argument("--install-hrx-tests", action="store_true", help="Also install the HRX HrxTestsDist test tree")
+    parser.add_argument("--skip-source-branch-check", action="store_true", help="Do not require source checkouts to be on the default branch names")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -591,7 +593,7 @@ def main() -> int:
         raise SystemExit("--gfx-targets must contain at least one target")
 
     if "check" in actions or len(actions) > 1 or actions[0] != "check":
-        require_prereqs(workspace, hrx_src, llama_src)
+        require_prereqs(workspace, hrx_src, llama_src, args.skip_source_branch_check)
 
     if "hrx" in actions:
         configure_hrx(workspace, hrx_src, gfx_targets, env, args.dry_run)

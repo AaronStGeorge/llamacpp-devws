@@ -102,6 +102,9 @@ python skills/bootstrap-hrx-llama-builds/scripts/bootstrap_builds.py \
 Pass `--hrx-source` and `--llama-source` to use source checkouts outside the
 workspace layout. These flags override the matching environment variables.
 
+Pass `--skip-source-branch-check` for detached checkouts, such as GitHub
+Actions pull request builds, while keeping source content checks enabled.
+
 ## Guardrails
 
 - Ask the human for missing `dnf` packages. Python packages may be installed in
