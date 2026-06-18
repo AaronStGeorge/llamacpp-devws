@@ -120,11 +120,15 @@ def run_test(args: argparse.Namespace) -> list[dict[str, object]]:
             parsed["test_file"] = str(args.test_file)
             results.append(parsed)
 
-    if proc.returncode != 0 and not results:
+    failed = [row for row in results if not row["passed"]]
+    if proc.returncode != 0 or failed or not results:
         sys.stderr.write(proc.stdout)
+        if proc.stdout and not proc.stdout.endswith("\n"):
+            sys.stderr.write("\n")
+
+    if proc.returncode != 0 and not results:
         raise SystemExit(proc.returncode)
     if not results:
-        sys.stderr.write(proc.stdout)
         raise SystemExit(f"No {args.op} test results were parsed")
     return results
 
