@@ -181,10 +181,8 @@ def print_dnf_hint(missing: list[str]) -> None:
         print(f"  sudo dnf install -y {' '.join(sorted(packages))}")
 
 
-def require_prereqs(workspace: Path) -> None:
+def require_prereqs(workspace: Path, hrx_src: Path, llama_src: Path) -> None:
     rocm = workspace / "rocm"
-    hrx_src = workspace / "sources" / "hrx-system"
-    llama_src = workspace / "sources" / "llama.cpp"
     missing_host: list[str] = []
     missing_rocm: list[str] = []
     errors: list[str] = []
@@ -259,14 +257,14 @@ def require_prereqs(workspace: Path) -> None:
     print("Prerequisite check passed.")
 
 
-def base_env(workspace: Path) -> dict[str, str]:
+def base_env(workspace: Path, hrx_src: Path, llama_src: Path) -> dict[str, str]:
     rocm = workspace / "rocm"
     env = os.environ.copy()
     env["LLAMACPP_DEVWS"] = str(workspace)
     env["ROCM_PATH"] = str(rocm)
     env["GGML_HRX_ROCM_PATH"] = str(rocm)
-    env["HRX_SYSTEM_SOURCE"] = str(workspace / "sources" / "hrx-system")
-    env["LLAMA_CPP_SOURCE"] = str(workspace / "sources" / "llama.cpp")
+    env["HRX_SYSTEM_SOURCE"] = str(hrx_src)
+    env["LLAMA_CPP_SOURCE"] = str(llama_src)
     env["PATH"] = (
         f"{rocm / 'bin'}:{rocm / 'lib' / 'llvm' / 'bin'}:"
         f"{env.get('PATH', '')}"
@@ -276,16 +274,15 @@ def base_env(workspace: Path) -> dict[str, str]:
     return env
 
 
-def configure_hrx(workspace: Path, gfx_targets: list[str], env: dict[str, str], dry_run: bool) -> None:
+def configure_hrx(workspace: Path, hrx_src: Path, gfx_targets: list[str], env: dict[str, str], dry_run: bool) -> None:
     rocm = workspace / "rocm"
     build = workspace / "build" / "hrx-system"
-    src = workspace / "sources" / "hrx-system"
     clang = rocm / "lib" / "llvm" / "bin" / "clang"
     clangxx = rocm / "lib" / "llvm" / "bin" / "clang++"
     args = [
         "cmake",
         "-S",
-        str(src),
+        str(hrx_src),
         "-B",
         str(build),
         "-G",
@@ -443,18 +440,18 @@ def rocm_health(workspace: Path, env: dict[str, str]) -> None:
 
 def configure_llama(
     workspace: Path,
+    llama_src: Path,
     name: str,
     extra_args: list[str],
     env: dict[str, str],
     dry_run: bool,
 ) -> Path:
     rocm = workspace / "rocm"
-    src = workspace / "sources" / "llama.cpp"
     build = workspace / "build" / f"llama-{name}"
     base_args = [
         "cmake",
         "-S",
-        str(src),
+        str(llama_src),
         "-B",
         str(build),
         "-G",
@@ -544,6 +541,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=Path.cwd(), help="Workspace root")
     parser.add_argument(
+        "--hrx-source",
+        type=Path,
+        default=None,
+        help="HRX System source checkout. Defaults to $HRX_SYSTEM_SOURCE or $WORKSPACE/sources/hrx-system.",
+    )
+    parser.add_argument(
+        "--llama-source",
+        type=Path,
+        default=None,
+        help="llama.cpp source checkout. Defaults to $LLAMA_CPP_SOURCE or $WORKSPACE/sources/llama.cpp.",
+    )
+    parser.add_argument(
         "--action",
         action="append",
         choices=["check", "rocm-health", "hrx", "loom", "llama-cpu", "llama-vulkan", "llama-hrx", "llama-hrx2", "all"],
@@ -565,8 +574,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     workspace = args.workspace.resolve()
+    hrx_src = (
+        args.hrx_source
+        or (Path(os.environ["HRX_SYSTEM_SOURCE"]) if os.environ.get("HRX_SYSTEM_SOURCE") else workspace / "sources" / "hrx-system")
+    ).resolve()
+    llama_src = (
+        args.llama_source
+        or (Path(os.environ["LLAMA_CPP_SOURCE"]) if os.environ.get("LLAMA_CPP_SOURCE") else workspace / "sources" / "llama.cpp")
+    ).resolve()
     actions = expand_actions(args.action or ["check"])
-    env = base_env(workspace)
+    env = base_env(workspace, hrx_src, llama_src)
 
     needs_gfx_targets = any(action in actions for action in ("hrx", "loom", "llama-hrx"))
     gfx_targets = resolve_gfx_targets(workspace, args.gfx_targets, env) if needs_gfx_targets else []
@@ -574,14 +591,14 @@ def main() -> int:
         raise SystemExit("--gfx-targets must contain at least one target")
 
     if "check" in actions or len(actions) > 1 or actions[0] != "check":
-        require_prereqs(workspace)
+        require_prereqs(workspace, hrx_src, llama_src)
 
     if "hrx" in actions:
-        configure_hrx(workspace, gfx_targets, env, args.dry_run)
+        configure_hrx(workspace, hrx_src, gfx_targets, env, args.dry_run)
         build_hrx(workspace, env, args.jobs, args.dry_run, args.configure_only, args.install_hrx_tests)
 
     if "loom" in actions:
-        configure_hrx(workspace, gfx_targets, env, args.dry_run)
+        configure_hrx(workspace, hrx_src, gfx_targets, env, args.dry_run)
         build_loom_targets(workspace, env, args.jobs, args.dry_run, args.configure_only)
         if not args.configure_only and not args.dry_run:
             verify_loom(workspace)
@@ -593,25 +610,25 @@ def main() -> int:
             rocm_health(workspace, env)
 
     if "llama-cpu" in actions:
-        build = configure_llama(workspace, "cpu", llama_cpu_args(), env, args.dry_run)
+        build = configure_llama(workspace, llama_src, "cpu", llama_cpu_args(), env, args.dry_run)
         build_llama(workspace, build, env, args.jobs, args.dry_run, args.configure_only)
         if not args.configure_only and not args.dry_run:
             verify_llama_build(build, "GGML_CPU:BOOL=ON")
 
     if "llama-vulkan" in actions:
-        build = configure_llama(workspace, "vulkan", llama_vulkan_args(), env, args.dry_run)
+        build = configure_llama(workspace, llama_src, "vulkan", llama_vulkan_args(), env, args.dry_run)
         build_llama(workspace, build, env, args.jobs, args.dry_run, args.configure_only)
         if not args.configure_only and not args.dry_run:
             verify_llama_build(build, "GGML_VULKAN:BOOL=ON")
 
     if "llama-hrx" in actions:
-        build = configure_llama(workspace, "hrx", llama_hrx_args(workspace, gfx_targets), env, args.dry_run)
+        build = configure_llama(workspace, llama_src, "hrx", llama_hrx_args(workspace, gfx_targets), env, args.dry_run)
         build_llama(workspace, build, env, args.jobs, args.dry_run, args.configure_only)
         if not args.configure_only and not args.dry_run:
             verify_llama_build(build, "GGML_HRX:BOOL=ON")
 
     if "llama-hrx2" in actions:
-        build = configure_llama(workspace, "hrx2", llama_hrx2_args(workspace, args.dry_run), env, args.dry_run)
+        build = configure_llama(workspace, llama_src, "hrx2", llama_hrx2_args(workspace, args.dry_run), env, args.dry_run)
         build_llama(workspace, build, env, args.jobs, args.dry_run, args.configure_only)
         if not args.configure_only and not args.dry_run:
             verify_llama_build(build, "GGML_HRX2:BOOL=ON")

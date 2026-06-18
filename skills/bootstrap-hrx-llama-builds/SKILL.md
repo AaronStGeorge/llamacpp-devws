@@ -82,6 +82,8 @@ The script uses these workspace-local directories:
 - Required llama.cpp branch: `hrx-v2`.
 - Required hrx-system branch: `main`.
 - ROCm path: `$WORKSPACE/rocm`.
+- Source checkouts: `$HRX_SYSTEM_SOURCE` / `$LLAMA_CPP_SOURCE` when set,
+  otherwise `$WORKSPACE/sources/hrx-system` and `$WORKSPACE/sources/llama.cpp`.
 - Default GPU target: auto-detected from `rocminfo`.
 - CMake generator: `Ninja`.
 - Build type: `RelWithDebInfo`.
@@ -96,6 +98,9 @@ separators. This is required when building on a host without a visible ROCm GPU:
 python skills/bootstrap-hrx-llama-builds/scripts/bootstrap_builds.py \
   --action all --gfx-targets gfx1151
 ```
+
+Pass `--hrx-source` and `--llama-source` to use source checkouts outside the
+workspace layout. These flags override the matching environment variables.
 
 ## Guardrails
 
