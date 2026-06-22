@@ -105,6 +105,7 @@ def render_step_summary(
     baseline_path: Path,
     candidate_path: Path,
     max_regression_pct: float,
+    min_regression_us: float,
     table_rows: list[dict[str, object]],
     missing: list[str],
     extra: list[str],
@@ -126,6 +127,7 @@ def render_step_summary(
         f"- Baseline: `{baseline_path}`",
         f"- Candidate: `{candidate_path}`",
         f"- Max regression threshold: `{max_regression_pct:.2f}%`",
+        f"- Min absolute regression threshold: `{min_regression_us:.3f} us`",
         "",
         "| " + " | ".join(TABLE_HEADERS) + " |",
         "| " + " | ".join("---" for _ in TABLE_HEADERS) + " |",
@@ -140,7 +142,7 @@ def render_step_summary(
     if failures:
         lines.extend(["", "**Result:** failed. Comparison checks did not pass."])
     else:
-        lines.extend(["", "**Result:** passed. No timing regressions exceeded the threshold."])
+        lines.extend(["", "**Result:** passed. No timing regressions exceeded the thresholds."])
 
     return "\n".join(lines) + "\n"
 
@@ -149,6 +151,7 @@ def render_skipped_step_summary(
     baseline_path: Path,
     candidate_path: Path,
     max_regression_pct: float,
+    min_regression_us: float,
 ) -> str:
     return "\n".join(
         [
@@ -159,6 +162,7 @@ def render_skipped_step_summary(
             f"- Baseline: `{baseline_path}`",
             f"- Candidate: `{candidate_path}`",
             f"- Max regression threshold: `{max_regression_pct:.2f}%`",
+            f"- Min absolute regression threshold: `{min_regression_us:.3f} us`",
             "",
             "**Result:** skipped.",
         ]
@@ -192,6 +196,15 @@ def main() -> None:
         help="Allowed candidate time_us increase per case before failing",
     )
     parser.add_argument(
+        "--min-regression-us",
+        type=float,
+        default=5.0,
+        help=(
+            "Minimum absolute candidate time_us increase per case before failing; "
+            "a timing regression must exceed both this and --max-regression-pct"
+        ),
+    )
+    parser.add_argument(
         "--require-all-cases",
         action="store_true",
         help="Fail if any baseline case is missing from the candidate",
@@ -214,6 +227,7 @@ def main() -> None:
                     args.baseline,
                     args.candidate,
                     args.max_regression_pct,
+                    args.min_regression_us,
                 )
             )
             raise SystemExit(0)
@@ -237,17 +251,19 @@ def main() -> None:
         cand = candidate[case]
         base_us = float(base["time_us"])
         cand_us = float(cand["time_us"])
-        delta_pct = pct(cand_us - base_us, base_us)
+        delta_us = cand_us - base_us
+        delta_pct = pct(delta_us, base_us)
         base_metric, base_rate = rate(base)
         cand_metric, cand_rate = rate(cand)
         metric = base_metric if base_metric == cand_metric else f"{base_metric}/{cand_metric}"
         status = "ok"
 
-        if delta_pct > args.max_regression_pct:
+        if delta_pct > args.max_regression_pct and delta_us > args.min_regression_us:
             status = "regress"
             failures.append(
                 f"{case_name(base, case)}: {cand_us:.3f} us vs {base_us:.3f} us "
-                f"({delta_pct:+.2f}%, limit +{args.max_regression_pct:.2f}%)"
+                f"({delta_us:+.3f} us, {delta_pct:+.2f}%; "
+                f"limits +{args.min_regression_us:.3f} us and +{args.max_regression_pct:.2f}%)"
             )
 
         table_rows.append(
@@ -281,6 +297,7 @@ def main() -> None:
             args.baseline,
             args.candidate,
             args.max_regression_pct,
+            args.min_regression_us,
             table_rows,
             missing,
             extra,
@@ -294,7 +311,7 @@ def main() -> None:
             print(f"  {failure}")
         raise SystemExit(1)
 
-    print("\nNo timing regressions exceeded the threshold.")
+    print("\nNo timing regressions exceeded the thresholds.")
 
 
 if __name__ == "__main__":
